@@ -28,6 +28,18 @@ export class NetworkManager {
     this.sendAccum = 0;
     this.enemySyncAccum = 0;
     this.hostPlayerSyncAccum = 0;
+
+    // ===== 新增：网络健壮化状态 =====
+    this._clientPendingKills = new Map();   // 客机预测击杀: enemyNetId -> 时间戳
+    this._playerLastSeen = new Map();       // 主机记录每个玩家最后活动时间
+    this._lastHostDataTime = 0;             // 客机记录最后一次收到主机数据的时间
+    this._reconnecting = false;
+    this._reconnectAttempts = 0;
+    this._maxReconnectAttempts = 5;
+    this._reconnectPermanentlyFailed = false;
+    this._playerTimeoutMs = 15000;          // 主机：15 秒无数据踢出
+    this._hostSilenceMs = 10000;            // 客机：10 秒无主机数据视为断线
+    this._pendingKillTimeoutMs = 3000;      // 客机：3 秒未确认则回滚预测击杀
   }
 
   async _ensurePeerJS() {
@@ -102,6 +114,7 @@ export class NetworkManager {
         const idx = this.conns.indexOf(entry);
         if (idx >= 0) this.conns.splice(idx, 1);
         this.remotePlayersData.delete(playerId);
+        this._playerLastSeen.delete(playerId);            // ← 新增
         this._broadcastExcept(playerId, { type: 'player_leave', playerId });
         if (this.game) this.game.onMultiPlayerLeft(playerId);
         if (this.conns.length === 0) this.connected = false;
@@ -122,6 +135,7 @@ export class NetworkManager {
 
   _handleHostData(data, entry) {
     if (!data || !data.type) return;
+    this._playerLastSeen.set(entry.playerId, performance.now());   // ← 新增
     const pid = entry.playerId;
     switch (data.type) {
       case 'state':
@@ -171,33 +185,66 @@ export class NetworkManager {
     return new Promise((resolve, reject) => {
       try { this.peer = new Peer(); }
       catch (e) { reject(e); return; }
+
+      // 超时清理：先销毁 peer，再 reject，避免半开连接泄漏
+      const cleanupAndReject = (err) => {
+        try { if (this.conn) this.conn.close(); } catch (e) {}
+        try { if (this.peer) this.peer.destroy(); } catch (e) {}
+        this.conn = null;
+        this.peer = null;
+        reject(err);
+      };
+
       this.peer.on('open', () => {
         const conn = this.peer.connect('tank3d-' + code, { reliable: true });
         this.conn = conn;
-        if (!conn) { reject(new Error('无法连接')); return; }
-        const timeout = setTimeout(() => reject(new Error('连接超时')), 8000);
+        if (!conn) { cleanupAndReject(new Error('无法连接')); return; }
+
+        const timeout = setTimeout(() => {
+          cleanupAndReject(new Error('连接超时'));
+        }, 8000);
+
         conn.on('open', () => {
           clearTimeout(timeout);
           this.connected = true;
+          this._lastHostDataTime = performance.now();
           this._setupClientConnection();
           resolve();
         });
         conn.on('data', (data) => this._handleClientData(data));
-        conn.on('error', (err) => { clearTimeout(timeout); reject(err); });
+        conn.on('error', (err) => {
+          clearTimeout(timeout);
+          cleanupAndReject(err);
+        });
       });
-      this.peer.on('error', (err) => reject(err));
+
+      this.peer.on('error', (err) => {
+        try { if (this.peer) this.peer.destroy(); } catch (e) {}
+        this.peer = null;
+        reject(err);
+      });
     });
   }
 
   _setupClientConnection() {
     const conn = this.conn;
     if (!conn) return;
-    conn.on('close', () => { this.connected = false; this.game.onNetworkDisconnected(); });
-    conn.on('error', () => { this.connected = false; this.game.onNetworkDisconnected(); });
+    const onDrop = () => {
+      // 只处理"当前 conn"的断开，避免旧 conn 关闭误触发重连
+      if (conn !== this.conn) return;
+      if (this._reconnectPermanentlyFailed) return;
+      const wasConnected = this.connected;
+      this.connected = false;
+      if (wasConnected && this.game) this.game.onNetworkDisconnected();
+      if (!this._reconnecting) this._attemptReconnect();
+    };
+    conn.on('close', onDrop);
+    conn.on('error', onDrop);
   }
 
   _handleClientData(data) {
     if (!data || !data.type) return;
+    this._lastHostDataTime = performance.now();   // ← 新增
     switch (data.type) {
       case 'init':
         this.myPlayerId = data.playerId;
@@ -234,7 +281,11 @@ export class NetworkManager {
 
   update(dt) {
     if (!this.connected) return;
+    const now = performance.now();
+
     if (this.isHost) {
+      this._cleanupTimeoutPlayers(now);
+
       this.hostPlayerSyncAccum += dt;
       if (this.hostPlayerSyncAccum >= NET_PLAYER_SYNC_INTERVAL) {
         this.hostPlayerSyncAccum = 0;
@@ -246,13 +297,24 @@ export class NetworkManager {
         this._hostBroadcastEnemies();
       }
     } else {
+      // 客机：长时间收不到主机数据 → 视为断线
+      if (this._lastHostDataTime > 0 && now - this._lastHostDataTime > this._hostSilenceMs) {
+        this.connected = false;
+        if (this.game) this.game.onNetworkDisconnected();
+        this._lastHostDataTime = 0;
+        if (!this._reconnecting && !this._reconnectPermanentlyFailed) {
+          this._attemptReconnect();
+        }
+        return;
+      }
+
       this.sendAccum += dt;
       if (this.sendAccum >= NET_SEND_INTERVAL) {
         this.sendAccum = 0;
         this._sendStateNow();
       }
     }
-    const now = performance.now();
+
     this._pendingFireEvents = this._pendingFireEvents.filter(e => now - e.t < 200);
   }
 
@@ -343,8 +405,102 @@ export class NetworkManager {
   }
 
   getPlayerCount() { return this.isHost ? 1 + this.conns.length : this.remotePlayersData.size + 1; }
+  
+  /* ========== 新增：主机超时玩家清理 ========== */
+  _cleanupTimeoutPlayers(now) {
+    for (const entry of [...this.conns]) {
+      const last = this._playerLastSeen.get(entry.playerId) || 0;
+      if (now - last > this._playerTimeoutMs) {
+        console.warn(`[Network] 玩家 ${entry.playerId} 超时无数据，踢出`);
+        this._playerLastSeen.delete(entry.playerId);
+        try { entry.conn.close(); } catch (e) {}
+        // conn.on('close') 会触发 onClose 里剩下的清理（remotePlayersData 等）
+      }
+    }
+  }
+
+  /* ========== 新增：客机自动重连（指数退避） ========== */
+  async _attemptReconnect() {
+    if (this.isHost) return;
+    if (this._reconnecting) return;
+    if (!this.roomCode) return;
+    if (this._reconnectPermanentlyFailed) return;
+
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      this._reconnecting = false;
+      this._reconnectPermanentlyFailed = true;
+      if (this.game) this.game.onReconnectFailed();
+      return;
+    }
+
+    this._reconnecting = true;
+    this._reconnectAttempts++;
+
+    const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts - 1), 8000);
+    if (this.game) {
+      this.game.showBanner(
+        `连接断开 · ${(delay / 1000).toFixed(0)}秒后重连 (${this._reconnectAttempts}/${this._maxReconnectAttempts})`
+      );
+    }
+
+    await new Promise(r => setTimeout(r, delay));
+
+    // 清理旧连接（先置空 this.conn，避免旧 conn close 又触发重连）
+    const oldConn = this.conn;
+    const oldPeer = this.peer;
+    this.conn = null;
+    this.peer = null;
+    if (oldConn) { try { oldConn.close(); } catch (e) {} }
+    if (oldPeer) { try { oldPeer.destroy(); } catch (e) {} }
+
+    try {
+      await this.joinRoom(this.roomCode);
+      // 成功：joinRoom 内部已置 connected=true，客机静默计时重置
+      this._lastHostDataTime = performance.now();
+      this._reconnecting = false;
+      this._reconnectAttempts = 0;
+      if (this.game) this.game.onReconnectSuccess();
+    } catch (err) {
+      console.warn('[Network] 重连失败：', err && err.message || err);
+      this._reconnecting = false;
+      this._attemptReconnect();
+    }
+  }
+
+  /* ========== 新增：客机预测击杀接口 ========== */
+  markClientKill(enemyNetId) {
+    if (enemyNetId === undefined || enemyNetId === null) return;
+    this._clientPendingKills.set(enemyNetId, performance.now());
+  }
+
+  isClientKillPending(enemyNetId) {
+    return this._clientPendingKills.has(enemyNetId);
+  }
+
+  /* 主机确认死亡后由 game.syncRemoteEnemies 调用 */
+  confirmClientKill(enemyNetId) {
+    this._clientPendingKills.delete(enemyNetId);
+  }
+
+  /* 检查超时的预测击杀并回滚 */
+  prunePendingKills(now) {
+    if (this._clientPendingKills.size === 0) return;
+    for (const [id, t] of this._clientPendingKills) {
+      if (now - t > this._pendingKillTimeoutMs) {
+        this._clientPendingKills.delete(id);
+      }
+    }
+  }
 
   disconnect() {
+    this._reconnecting = false;
+    this._reconnectAttempts = 0;
+    this._reconnectPermanentlyFailed = false;
+    this._clientPendingKills.clear();
+    this._playerLastSeen.clear();
+    this._lastHostDataTime = 0;
+    this._pendingFireEvents = [];
+
     try {
       if (this.conn) this.conn.close();
       for (const entry of this.conns) { if (entry.conn) entry.conn.close(); }

@@ -697,10 +697,24 @@ export class Game {
   syncRemoteEnemies() {
     if (!this.network || !this.network.remoteEnemyData) return;
     const data = this.network.remoteEnemyData;
+    const pendingKills = this.network._clientPendingKills;
+    const now = performance.now();
     const seen = new Set();
     const colors = [0x8a3a2a, 0x7a5a2a, 0x6a3a4a, 0x5a4a2a, 0x8a6a3a, 0x6a2a2a];
+
+    // 1) 先按超时规则剔除过期预测击杀，让主机状态重新接管
+    if (pendingKills.size > 0) {
+      for (const [id, t] of pendingKills) {
+        if (now - t > 3000) pendingKills.delete(id);
+      }
+    }
+
+    // 2) 处理主机广播
     for (const item of data) {
       seen.add(item.id);
+      // 本地预测击杀未确认：忽略主机的"还活着"状态
+      if (pendingKills.has(item.id)) continue;
+
       let enemy = this.enemies.find(e => e._netId === item.id);
       if (!enemy) {
         enemy = new Tank(this, {
@@ -721,9 +735,12 @@ export class Game {
       enemy.turret.rotation.y = enemy.turretYaw;
       if (enemy.hp !== item.hp) enemy.hp = item.hp;
     }
+
+    // 3) 主机已不广播的本地 synced 敌人 = 主机确认死亡
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       if (e._isRemoteSynced && !seen.has(e._netId)) {
+        if (pendingKills.has(e._netId)) pendingKills.delete(e._netId);
         e.group.visible = false; e.dead = true;
         this.scene.remove(e.group);
         this.enemies.splice(i, 1);
@@ -1191,6 +1208,22 @@ export class Game {
     if (this.el.netStatus) this.el.netStatus.classList.remove('on');
   }
 
+  // ===== 新增 =====
+  onReconnectSuccess() {
+    this.showBanner('重新连接成功');
+    if (this.el.netStatus) this.el.netStatus.classList.add('on');
+  }
+
+  onReconnectFailed() {
+    this.showBanner('重连失败 · 即将返回菜单');
+    if (this.el.netStatus) this.el.netStatus.classList.remove('on');
+    setTimeout(() => {
+      if (this.state === 'playing' || this.state === 'paused') {
+        this.backToMenu();
+      }
+    }, 2500);
+  }
+
   startMultiGame(seed, myPlayerId, myColorIdx, isHost) {
     this.mode = 'multi';
     TerrainSystem.init('multi', seed);
@@ -1202,7 +1235,10 @@ export class Game {
       this.player = null;
     }
     this.createPlayer(myColorIdx);
-    if (this.network) this.network.myPlayerId = myPlayerId;
+    if (this.network) {
+      this.network.myPlayerId = myPlayerId;
+      this.network._clientPendingKills.clear();   // ← 新增：世界重建时清空预测击杀
+    }
     this.state = 'playing';
     this.el.menu.classList.add('hidden');
     this.el.multiLobby.classList.add('hidden');
@@ -1439,10 +1475,16 @@ export class Game {
     if (this.input.fire && p.cooldown <= 0) p.fire();
   }
   updateEnemies(dt) {
+    const pendingKills = this.network ? this.network._clientPendingKills : null;
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       if (!e._isRemoteSynced) e.updateAI(dt);
       if (e.dead) {
+        // 客机预测击杀的敌人：暂不从列表移除，等主机广播确认
+        // （避免 syncRemoteEnemies 每帧把"死"的敌人当成新敌人重建 → 复活闪烁）
+        if (pendingKills && e._isRemoteSynced && pendingKills.has(e._netId)) {
+          continue;
+        }
         this.enemies.splice(i, 1);
         const ti = this.tanks.indexOf(e);
         if (ti >= 0) this.tanks.splice(ti, 1);

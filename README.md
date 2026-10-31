@@ -3,8 +3,8 @@
 > 基于 Three.js 构建的 3D 坦克射击游戏，支持波次、冒险、多人联机、分屏四种模式。
 
 <p align="center">
-  <a href="https://dzxcyaly.github.io/tkdz-html">
-    <img src="https://img.shields.io/badge/▶_立即游玩-dzxcyaly.github.io/tkdz--html-ffcc33?style=for-the-badge" alt="Play Now">
+  <a href="https://dzcsyaly.github.io/tkdz-html">
+    <img src="https://img.shields.io/badge/▶_立即游玩-dzcsyaly.github.io/tkdz--html-ffcc33?style=for-the-badge" alt="Play Now">
   </a>
 </p>
 
@@ -19,7 +19,7 @@
 
 ## 🚀 在线游玩
 
-**👉 [https://dzxcyaly.github.io/tkdz-html](https://dzxcyaly.github.io/tkdz-html)**
+**👉 [https://dzcsyaly.github.io/tkdz-html](https://dzcsyaly.github.io/tkdz-html)**
 
 无需安装，打开浏览器即玩。首次加载需要下载 Three.js 与 PeerJS（约 1.5 MB），请保持网络畅通。
 
@@ -153,8 +153,8 @@
 
 <p align="center">
   <b>⭐ 如果这个项目对你有帮助，请给个 Star ⭐</b><br>
-  <a href="https://dzxcyaly.github.io/tkdz-html">🎮 立即游玩</a> ·
-  <a href="https://github.com/dzxcyaly/tkdz-html/issues">🐛 报告问题</a>
+  <a href="https://dzcsyaly.github.io/tkdz-html">🎮 立即游玩</a> ·
+  <a href="https://github.com/dzcsyaly/tkdz-html/issues">🐛 报告问题</a>
 </p>
 
 ---

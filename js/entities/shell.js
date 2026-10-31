@@ -89,6 +89,7 @@ export class Shell {
         const isSyncedEnemy = tank.team === 'enemy' && tank._isRemoteSynced && tank._netId !== undefined;
         if (isClient && isSyncedEnemy) {
           this.game.network.sendEnemyHit(tank._netId, this.damage);
+          this.game.network.markClientKill(tank._netId);          // ← 新增
           P.spawn(pos, 12, { speed: 15, mat: 'spark', life: 0.55, gravity: 14, size: 0.9 });
           P.spawn(pos, 8, { speed: 9, mat: 'fire2', life: 0.55, gravity: 8, size: 1.3 });
           this.game.audio.hit();
