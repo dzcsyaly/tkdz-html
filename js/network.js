@@ -146,6 +146,15 @@ export class NetworkManager {
         });
         break;
       case 'fire':
+        // 主机自身也要在本地生成客机炮弹（原来只转发给其他客机，主机视角看不到）
+        this._pendingFireEvents.push({
+          playerId: pid,
+          colorIdx: entry.colorIdx,
+          pos: new THREE.Vector3(data.x, data.y, data.z),
+          dir: new THREE.Vector3(data.dx, data.dy, data.dz),
+          t: performance.now(),
+        });
+        // 继续转发给其他客机（排除发送者）
         this._broadcastExcept(pid, {
           type: 'fire', playerId: pid,
           x: data.x, y: data.y, z: data.z,
