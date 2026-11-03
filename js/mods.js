@@ -64,8 +64,14 @@ export class ModManager {
     if (this.loaded.has(id)) {
       throw new Error(`模组 ${id} 已加载`);
     }
-    const cacheBust = (url.includes('?') ? '&' : '?') + 't=' + Date.now();
-    const module = await import(/* @vite-ignore */ url + cacheBust);
+
+    // ★ 关键修复：把相对路径解析成绝对 URL，避免 "Failed to resolve module specifier"
+    //    - new URL('mod/x.js', document.baseURI) → http://host/mod/x.js
+    //    - new URL('https://cdn/x.js', ...)    → 原样保留
+    //    - new URL('blob:...', ...)            → 原样保留
+    const absUrl = new URL(url, document.baseURI).href;
+    const cacheBust = (absUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+    const module = await import(/* @vite-ignore */ absUrl + cacheBust);
     return this._activate(module, {
       id,
       name: meta.name || id,
