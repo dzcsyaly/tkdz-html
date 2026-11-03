@@ -291,6 +291,42 @@
     #btnFire{width:68px;height:68px;}
     #btnUlt{top:48px;width:54px;height:54px;}
   }
+  .modCount{display:none;background:#ff4444;color:#fff;border-radius:10px;
+    padding:1px 7px;font-size:11px;font-weight:900;margin-left:6px;letter-spacing:0;
+    vertical-align:middle;}
+  .modPanelInner{max-width:780px;width:100%;max-height:88vh;display:flex;flex-direction:column;
+    background:rgba(12,20,32,.98);border-radius:16px;padding:24px;border:1px solid rgba(255,255,255,.15);
+    box-shadow:0 20px 60px rgba(0,0,0,.7);}
+  .modTabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+  .modTab{padding:9px 20px;border-radius:8px;border:1.5px solid rgba(255,255,255,.2);
+    background:rgba(40,55,75,.6);color:#ccd;font-family:inherit;font-size:13px;font-weight:700;
+    letter-spacing:1px;cursor:pointer;transition:all .15s;}
+  .modTab:hover{border-color:rgba(255,204,51,.6);color:#fff;}
+  .modTab.active{background:rgba(255,204,51,.22);border-color:rgba(255,204,51,.9);color:#ffcc33;}
+  .modContent{flex:1;overflow-y:auto;min-height:240px;padding:4px;}
+  .modCard{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+    border-radius:10px;padding:14px 16px;margin-bottom:10px;transition:border-color .15s;}
+  .modCard:hover{border-color:rgba(255,204,51,.4);}
+  .modCardLoaded{border-color:rgba(68,255,136,.3);background:rgba(68,255,136,.05);}
+  .modHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;}
+  .modTitle{font-size:16px;font-weight:800;color:#fff;letter-spacing:1px;}
+  .modVer{font-size:11px;opacity:.55;font-weight:500;margin-left:6px;}
+  .modAuthor{font-size:11px;opacity:.55;flex-shrink:0;}
+  .modDesc{font-size:13px;line-height:1.6;opacity:.8;margin-bottom:10px;}
+  .modActions{display:flex;justify-content:flex-end;gap:8px;}
+  .modBtn{padding:7px 20px;border-radius:6px;border:1px solid rgba(255,204,51,.5);
+    background:rgba(255,204,51,.15);color:#ffcc33;font-family:inherit;font-size:12px;
+    font-weight:800;letter-spacing:1px;cursor:pointer;transition:all .15s;}
+  .modBtn:hover{background:rgba(255,204,51,.3);border-color:#ffcc33;}
+  .modBtn.danger{border-color:rgba(255,100,100,.5);background:rgba(255,100,100,.1);color:#ff8888;}
+  .modBtn.danger:hover{background:rgba(255,100,100,.25);border-color:#ff6666;}
+  .modBtn:disabled{opacity:.4;cursor:not-allowed;}
+  .modEmpty{text-align:center;padding:48px 20px;font-size:14px;opacity:.65;line-height:2;}
+  .modCode{background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);
+    border-radius:8px;padding:14px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+    line-height:1.6;overflow-x:auto;color:#aac;margin-bottom:16px;text-align:left;}
+  .modLocal{text-align:center;padding:12px 4px;}
+  .modLocal code{background:rgba(255,204,51,.15);padding:1px 6px;border-radius:3px;color:#ffcc33;}
 </style>
 </head>
 <body>
@@ -368,6 +404,7 @@
     <button class="modeBtn multi" id="btnModeMulti"><div class="title">👥 多人模式</div><div class="desc">创建或加入房间 · 同一世界 · 互相伤害</div></button>
     <button class="modeBtn split" id="btnModeSplit"><div class="title">🖥 分屏模式</div><div class="desc">单浏览器多实例 · 共享房间 · 从左到右排列</div></button>
   </div>
+  <button class="btn secondary" id="btnOpenMods" style="margin-top:8px;">🧩 加载模组 <span id="modCount" class="modCount"></span></button>
   <button class="muteBtn" id="btnMuteMenu">
     <span class="mIcon">🔊</span>
     <span class="mText">音效已开启 · 点击静音</span>
@@ -441,6 +478,21 @@
   <div class="row">
     <button class="btn" id="btnRestart2">再战一局</button>
     <button class="btn secondary" id="btnMenu2">返回菜单</button>
+  </div>
+</div>
+
+<div id="modPanel" class="screen hidden">
+  <div class="modPanelInner">
+    <h1 style="font-size:38px;margin-bottom:18px;background:none;-webkit-text-fill-color:initial;color:#fff;">🧩 模组管理</h1>
+    <div class="modTabs">
+      <button class="modTab active" data-tab="official">🌐 官方模组</button>
+      <button class="modTab" data-tab="local">📁 本地文件</button>
+      <button class="modTab" data-tab="loaded">✅ 已加载</button>
+    </div>
+    <div id="modContent" class="modContent"></div>
+    <div class="row" style="margin-top:20px;">
+      <button class="btn secondary" id="btnCloseMods">关闭</button>
+    </div>
   </div>
 </div>
 

@@ -27,6 +27,8 @@ import { Tank } from './entities/tank.js';
 import { Shell } from './entities/shell.js';
 import { Obstacle } from './entities/obstacle.js';
 import { Mine } from './entities/mine.js';
+import { ModManager } from './mods.js';
+import { ModsUI } from './mods_ui.js';
 
 export class Game {
   constructor() {
@@ -47,6 +49,7 @@ export class Game {
     this.remoteEnemyNextId = 0;
     this.hostLobbyPlayers = new Map();
     this.audio = new AudioManager();
+    this.mods = new ModManager(this);
     this.input = {
       forward: false, backward: false, left: false, right: false,
       fire: false, mine: false, ult: false, aimX: 0, aimY: 0,
@@ -66,6 +69,7 @@ export class Game {
     this.initInput();
     this.initTouchControls();
     this.initUI();
+    this.modsUI = new ModsUI(this);
 
     this.renderer.setAnimationLoop((ts) => this.tick(ts));
     window.__gameStarted = true;
@@ -572,6 +576,7 @@ export class Game {
       }
       this.enemies.push(enemy);
       this.tanks.push(enemy);
+      if (this.mods) this.mods.fire('onEnemySpawn', enemy);
     }
     this.showBanner(`第 ${n} 波 · ${count} 敌`);
     this.updateHUD();
@@ -657,6 +662,7 @@ export class Game {
       }
       this.enemies.push(enemy);
       this.tanks.push(enemy);
+      if (this.mods) this.mods.fire('onEnemySpawn', enemy);
     }
   }
 
@@ -725,6 +731,7 @@ export class Game {
         enemy._netId = item.id; enemy._netColor = item.color;
         enemy._isRemoteSynced = true;
         this.enemies.push(enemy); this.tanks.push(enemy);
+        if (this.mods) this.mods.fire('onEnemySpawn', enemy);
       }
       enemy.group.position.x = item.x;
       enemy.group.position.z = item.z;
@@ -1466,6 +1473,9 @@ export class Game {
       this.updateCamera(dt);
       this.particles.update(dt);
     }
+    if (this.state === 'playing' && this.mods) {
+      this.mods.fire('onUpdate', dt);
+    }
   }
 
   updatePlayer(dt) {
@@ -1606,6 +1616,7 @@ export class Game {
   }
 
   onTankDeath(tank) {
+    if (this.mods) this.mods.fire('onTankDeath', tank);
     if (tank.isPlayer) this.gameOver();
     else if (tank.team === 'enemy') { this.score += 100; this.updateHUD(); }
     else if (tank.team === 'remote_player') { this.score += 500; this.updateHUD(); }

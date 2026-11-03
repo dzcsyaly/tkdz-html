@@ -1,0 +1,26 @@
+[
+  {
+    "id": "speed-boost",
+    "name": "疾风加速",
+    "version": "1.0.0",
+    "description": "玩家移动速度提升 50%，敌人移动速度不变。适合想要快速游走的玩家。",
+    "author": "官方",
+    "file": "speed-boost.js"
+  },
+  {
+    "id": "hard-mode",
+    "name": "地狱模式",
+    "version": "1.0.0",
+    "description": "敌人血量翻倍，敌方伤害翻倍，玩家血量减半。硬核玩家的挑战。",
+    "author": "官方",
+    "file": "hard-mode.js"
+  },
+  {
+    "id": "ult-ready",
+    "name": "大招常驻",
+    "version": "1.0.0",
+    "description": "大招冷却永远为 0，想清几次清几次（演示钩子用法）。",
+    "author": "官方",
+    "file": "ult-ready.js"
+  }
+]

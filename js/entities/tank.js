@@ -151,7 +151,14 @@ export class Tank {
       dir.x += rand(-spread, spread); dir.y += rand(-spread, spread) * 0.5; dir.z += rand(-spread, spread);
       dir.normalize();
     }
-    this.game.addShell(new Shell(this.game, pos, dir, this));
+
+    // 构建 shell，让模组的 onPlayerFire 有机会修改后再入列
+    const shell = new Shell(this.game, pos, dir, this);
+    if (this.isPlayer && this.game.mods) {
+      this.game.mods.fire('onPlayerFire', this, shell);
+    }
+    this.game.addShell(shell);
+
     const P = this.game.particles;
     P.spawn(pos, 8, { speed: 15, mat: 'spark', life: 0.24, gravity: 6, size: 0.9, dir: dir.clone(), cone: 0.5, spread: 0.16 });
     P.spawn(pos, 6, { speed: 6, mat: 'smoke', life: 0.9, gravity: -2.5, size: 1.4, dir: dir.clone(), cone: 0.6, spread: 0.26 });
