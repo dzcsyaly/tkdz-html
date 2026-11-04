@@ -18,7 +18,9 @@
 //     onEnemySpawn(game, enemy) {},
 //   };
 
-import { applyConfigOverrides } from './config.js';
+import { applyConfigOverrides, IS_SPLIT_INSTANCE } from './config.js';
+
+const SESSION_KEY = 'tank3d_active_mods';
 
 export class ModManager {
   constructor(game) {
@@ -38,6 +40,7 @@ export class ModManager {
 
   onChange(cb) { this._onChange = cb; }
   _notify() {
+    this._syncToSessionStorage();
     if (this._onChange) {
       try { this._onChange(); } catch (e) { console.error(e); }
     }
@@ -64,11 +67,7 @@ export class ModManager {
     if (this.loaded.has(id)) {
       throw new Error(`模组 ${id} 已加载`);
     }
-
-    // ★ 关键修复：把相对路径解析成绝对 URL，避免 "Failed to resolve module specifier"
-    //    - new URL('mod/x.js', document.baseURI) → http://host/mod/x.js
-    //    - new URL('https://cdn/x.js', ...)    → 原样保留
-    //    - new URL('blob:...', ...)            → 原样保留
+    // 把相对路径解析成绝对 URL，避免 "Failed to resolve module specifier"
     const absUrl = new URL(url, document.baseURI).href;
     const cacheBust = (absUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
     const module = await import(/* @vite-ignore */ absUrl + cacheBust);
@@ -76,26 +75,38 @@ export class ModManager {
       id,
       name: meta.name || id,
       source: url,
+      sourceType: 'url',
     });
+  }
+
+  // ---------- 从源码加载（本地文件 / 分屏 iframe 恢复共用） ----------
+  async enableFromSourceCode(code, meta = {}) {
+    const blob = new Blob([code], { type: 'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const module = await import(/* @vite-ignore */ url);
+      const def = module.default || {};
+      const id = def.id || meta.id || ('local-' + Date.now());
+      return this._activate(module, {
+        id,
+        name: def.name || meta.name || id,
+        source: meta.name || '(本地)',
+        sourceType: 'local',
+        code,
+      });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
   }
 
   // ---------- 从本地文件加载 ----------
   async enableFromFile(file) {
     const text = await file.text();
-    const blob = new Blob([text], { type: 'text/javascript' });
-    const url = URL.createObjectURL(blob);
-    try {
-      const module = await import(/* @vite-ignore */ url);
-      const def = module.default || {};
-      const id = def.id || file.name.replace(/\.js$/i, '');
-      return this._activate(module, {
-        id,
-        name: def.name || file.name,
-        source: '(本地) ' + file.name,
-      });
-    } finally {
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    }
+    const fallbackId = file.name.replace(/\.js$/i, '');
+    return this.enableFromSourceCode(text, {
+      id: fallbackId,
+      name: file.name,
+    });
   }
 
   // ---------- 激活 ----------
@@ -112,6 +123,8 @@ export class ModManager {
       description: def.description || '',
       author: def.author || '',
       source: meta.source,
+      sourceType: meta.sourceType || 'url',
+      code: meta.code || null,
       config: def.config || null,
       hooks: {
         onInit: def.onInit,
@@ -159,7 +172,7 @@ export class ModManager {
       }
     }
     this.loaded.delete(id);
-    console.log(`[Mods] 已禁用 ${entry.name}（配置覆盖需重开一局或刷新才能完全恢复）`);
+    console.log(`[Mods] 已禁用 ${entry.name}（配置覆盖需刷新页面才能完全恢复）`);
     this._notify();
   }
 
@@ -174,4 +187,64 @@ export class ModManager {
   }
 
   isEnabled(id) { return this.loaded.has(id); }
+
+  // ============================================================
+  // sessionStorage 同步（分屏 iframe 通过它恢复模组）
+  // ============================================================
+  _syncToSessionStorage() {
+    // 分屏 iframe 不回写：避免某个模组在 iframe 里加载失败时，
+    // 用不完整的列表覆盖父窗口已保存的完整列表
+    if (IS_SPLIT_INSTANCE) return;
+    try {
+      const list = [];
+      for (const entry of this.loaded.values()) {
+        list.push({
+          id: entry.id,
+          name: entry.name,
+          source: entry.source,
+          sourceType: entry.sourceType,
+          code: entry.sourceType === 'local' ? entry.code : null,
+        });
+      }
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('[Mods] 同步到 sessionStorage 失败:', e);
+    }
+  }
+
+  async loadFromSessionStorage() {
+    let list = [];
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch (e) {
+      console.warn('[Mods] 读取 sessionStorage 失败:', e);
+      return 0;
+    }
+
+    let count = 0;
+    for (const item of list) {
+      try {
+        if (!item || !item.id || this.loaded.has(item.id)) continue;
+        if (item.sourceType === 'url' && item.source) {
+          await this.enableFromUrl(item.source, { id: item.id, name: item.name });
+          count++;
+        } else if (item.sourceType === 'local' && item.code) {
+          await this.enableFromSourceCode(item.code, { id: item.id, name: item.name });
+          count++;
+        }
+      } catch (e) {
+        console.warn(`[Mods] 恢复模组 ${item.id} 失败:`, e);
+      }
+    }
+    if (count > 0) console.log(`[Mods] 从会话恢复 ${count} 个模组`);
+    return count;
+  }
+
+  // 工具：手动清空本会话的模组记录
+  clearSessionStorage() {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+  }
 }

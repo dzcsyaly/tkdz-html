@@ -77,7 +77,7 @@ export class Game {
     if (loading) loading.classList.add('hidden');
 
     if (IS_SPLIT_INSTANCE) {
-      setTimeout(() => this._startSplitAutoRoom(), 300);
+      this._initSplitWithMods();
     }
   }
 
@@ -91,6 +91,23 @@ export class Game {
     if (hint) hint.style.display = 'none';
     const viewHint = document.getElementById('viewHint');
     if (viewHint) viewHint.style.display = 'none';
+  }
+
+  async _initSplitWithMods() {
+    // 分屏 iframe：先从 sessionStorage 恢复主窗口加载的模组
+    // 成功后再启动联网，确保第一次主机广播就已包含模组效果
+    try {
+      if (this.mods) {
+        const count = await this.mods.loadFromSessionStorage();
+        if (count > 0) {
+          console.log(`[Split] 已恢复 ${count} 个模组`);
+          this.showBanner(`已恢复 ${count} 个模组`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Split] 恢复模组失败，继续启动:', e);
+    }
+    setTimeout(() => this._startSplitAutoRoom(), 300);
   }
 
   async _startSplitAutoRoom() {
